@@ -68,7 +68,7 @@ All other dependencies are either included in `vendor` folder or automatically d
 
 ## Build
 
-1. Make sure you have the latest stable version of Rust installed, following the instructions on
+1. Make sure you have the latest stable version of Rust and `cargo` installed, following the instructions on
 https://www.rust-lang.org/tools/install
 
 2. Clone the repository
