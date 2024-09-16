@@ -1,234 +1,596 @@
+use std::{cell::RefCell, collections::HashSet, sync::Arc};
+
+use cfg_if::cfg_if;
 use cgmath::{Point3, Vector2};
-use glfw::{
-    fail_on_errors, Action, Context, CursorMode, Glfw, GlfwReceiver, Key, Modifiers, MouseButton,
-    PWindow, Window, WindowEvent,
-};
-use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-use crate::{
-    skybox::{Skybox, SkyboxBuilder},
-    Camera, DrawProperties, Gui, Model, Renderer,
+use winit::{
+    application::ApplicationHandler,
+    event::{DeviceEvent, ElementState, KeyEvent, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, EventLoop},
+    keyboard::{Key, KeyCode, NamedKey, PhysicalKey},
+    window::{CursorGrabMode, Window, WindowAttributes},
 };
 
-const WINDOW_WIDTH: u32 = 1024;
-const WINDOW_HEIGHT: u32 = 768;
+use crate::{assets, Camera, DrawProperties, Gui, Model, Renderer, Skybox};
+
+cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
+    use std::{
+        num::NonZeroU32,
+        time::Duration,
+    };
+
+    use glutin::{
+        config::{Config, ConfigTemplateBuilder},
+        context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext, Version},
+        display::GetGlDisplay,
+        prelude::*,
+        surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
+    };
+    use glutin_winit::{DisplayBuilder, GlWindow};
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use winit::{
+        dpi::{LogicalSize, PhysicalPosition},
+        platform::pump_events::{EventLoopExtPumpEvents, PumpStatus}
+    };
+
+    use crate::SkyboxFileBuilder;
+} else {
+    use wasm_bindgen::prelude::*;
+    use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
+    use winit::platform::web::WindowAttributesExtWebSys;
+
+    use crate::HtmlUI;
+    use crate::SkyboxBufferBuilder;
+}}
+
+cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
+    const WINDOW_WIDTH: u32 = 1024;
+    const WINDOW_HEIGHT: u32 = 768;
+}}
 const WINDOW_TITLE: &str = "3D Renderer in Rust by Bálint Kiss";
 
-// This is the granularity of how often to update logic and not to be confused
-// with framerate limiting or 60 frames per second, because the main loop
-// implementation uses a fixed update, variable framerate timestep algorithm.
-//
-// 60 logic updates per second is a common value used in games.
-// - Higher update rate (120) can lead to smoother gameplay, more precise
-// control, at the cost of CPU load. Keep mobile devices in mind.
-// - Lower update rate (30) reduces CPU load, runs game logic less frequently,
-// but can make game less responsive.
+/// This is the granularity of how often to update logic and not to be confused
+/// with framerate limiting or 60 frames per second, because the main loop
+/// implementation uses a fixed update, variable framerate timestep algorithm.
+///
+/// 60 logic updates per second is a common value used in games.
+/// - Higher update rate (120) can lead to smoother gameplay, more precise
+/// control, at the cost of CPU load. Keep mobile devices in mind.
+/// - Lower update rate (30) reduces CPU load, runs game logic less frequently,
+/// but can make game less responsive.
 const MAX_LOGIC_UPDATE_PER_SECOND: f32 = 60.0;
 const FIXED_UPDATE_TIMESTEP: f32 = 1.0 / MAX_LOGIC_UPDATE_PER_SECOND;
 
 /// Encapsulation of renderer application lifecycle and logic update to avoid
 /// polluting main().
 pub struct App {
-    last_mouse_pos: Vector2<f32>,
-    draw_props: DrawProperties,
-    skybox: Skybox,
-    models: Vec<Model>,
+    window: Option<Window>,
+    #[cfg(not(target_arch = "wasm32"))]
+    glutin_window_context: Option<GlutinWindowContext>,
+    renderer: Option<Renderer>,
+    // Pushing pressed keys from event loop into this collection and processing in update() makes
+    // movement continous. Naively checking for key press during event consumption leads to choppy
+    // movement.
+    keyboard_state: HashSet<KeyCode>,
+    right_mouse_pressed: bool,
+    draw_props: Arc<RefCell<DrawProperties>>,
     camera: Camera,
-    gui: Gui,
-    renderer: Renderer,
-    events: GlfwReceiver<(f64, WindowEvent)>,
-    window: PWindow,
-    glfw: Glfw,
+    skybox: Option<Skybox>,
+    models: Vec<Model>,
+    gui: Option<Gui>,
+    #[cfg(target_arch = "wasm32")]
+    html_ui: Option<HtmlUI>,
+}
+
+impl ApplicationHandler for App {
+    // It is recommended for winit applications to create window and initialize their graphics context
+    // after the first WindowEvent::Resumed even is received. There are systems that won't allow
+    // applications to create a renderer until that.
+    //
+    // Web: WindowEvent::Resumed is emitted in response to `pageshow` event.
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
+            let (window, glutin_window_context, gl) = match initialize_native_window(&event_loop) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("unable to initialize native window: {:?}", e);
+                    return;
+                }
+            };
+            let gl = Arc::new(gl);
+
+            let skybox = match SkyboxFileBuilder::new()
+                .with_right(assets::skybox::RIGHT_FACE_PATH)
+                .with_left(assets::skybox::LEFT_FACE_PATH)
+                .with_top(assets::skybox::TOP_FACE_PATH)
+                .with_bottom(assets::skybox::BOTTOM_FACE_PATH)
+                .with_front(assets::skybox::FRONT_FACE_PATH)
+                .with_back(assets::skybox::BACK_FACE_PATH)
+                .build(gl.clone()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("unable to create skybox for application: {e}");
+                        return;
+                    }
+                };
+
+            let model_paths = [
+                assets::model::CUBE_PATH,
+                assets::model::TEAPOT_PATH,
+                assets::model::BUNNY_PATH,
+            ];
+            let mut models: Vec<Model> = Vec::with_capacity(model_paths.len());
+            for model_path in &model_paths {
+                match Model::create_from_file(gl.clone(), model_path) {
+                    Ok(m) => models.push(m),
+                    Err(e) => {
+                        eprintln!("unable to create model from path {model_path}: {e}");
+                        return;
+                    }
+                }
+            }
+        } else {
+            let (window, gl) = match initialize_web_window(&event_loop) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("unable to initialize web window: {:?}", e);
+                    return;
+                }
+            };
+            let gl = Arc::new(gl);
+
+            let skybox = match SkyboxBufferBuilder::new()
+                .with_right(assets::skybox::RIGHT_FACE_BYTES)
+                .with_left(assets::skybox::LEFT_FACE_BYTES)
+                .with_top(assets::skybox::TOP_FACE_BYTES)
+                .with_bottom(assets::skybox::BOTTOM_FACE_BYTES)
+                .with_front(assets::skybox::FRONT_FACE_BYTES)
+                .with_back(assets::skybox::BACK_FACE_BYTES)
+                .build(gl.clone()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("unable to create skybox for application: {e}");
+                        return;
+                    }
+                };
+
+            let model_binaries: &[&'static [u8]] = &[
+                assets::model::CUBE_BYTES,
+                assets::model::TEAPOT_BYTES,
+                assets::model::BUNNY_BYTES,
+            ];
+            let mut models: Vec<Model> = Vec::with_capacity(model_binaries.len());
+            for model_data in model_binaries {
+                match Model::create_from_buffer(gl.clone(), model_data) {
+                    Ok(m) => models.push(m),
+                    Err(e) => {
+                        eprintln!("unable to create model: {e}");
+                        return;
+                    }
+                }
+            }
+        }}
+
+        let renderer = match Renderer::new(gl.clone()) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("unable to create renderer: {e}");
+                return;
+            }
+        };
+        let gui = Gui::new(&event_loop, gl.clone());
+
+        self.window = Some(window);
+        self.renderer = Some(renderer);
+        self.skybox = Some(skybox);
+        self.models = models;
+        self.gui = Some(gui);
+
+        cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
+            self.glutin_window_context = Some(glutin_window_context);
+        } else {
+            let html_ui = HtmlUI::new(self.draw_props.clone());
+            self.html_ui = Some(html_ui);
+        }}
+    }
+
+    fn window_event(
+        &mut self,
+        event_loop: &winit::event_loop::ActiveEventLoop,
+        _window_id: winit::window::WindowId,
+        event: winit::event::WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested
+            | WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        logical_key: Key::Named(NamedKey::Escape),
+                        ..
+                    },
+                ..
+            } => event_loop.exit(),
+            WindowEvent::Resized(physical_size)
+                if physical_size.width != 0 && physical_size.height != 0 =>
+            {
+                // Even though window sizing by user is prevented, the initial window size is set
+                // on application startup. OpenGL viewport setup is also setup here for the first
+                // time.
+                //
+                // Not all platforms require the resize of glutin surface, but it's best to be safe
+                // for portability.
+                #[cfg(not(target_arch = "wasm32"))]
+                self.glutin_window_context
+                    .as_ref()
+                    .unwrap()
+                    .resize(physical_size.width, physical_size.height);
+
+                let field_of_view = self.draw_props.borrow().field_of_view;
+                self.renderer.as_mut().unwrap().resize(
+                    physical_size.width,
+                    physical_size.height,
+                    field_of_view,
+                );
+            },
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(key),
+                        repeat: false,
+                        state,
+                        ..
+                    },
+                is_synthetic: false,
+                ..
+            } => match state {
+                ElementState::Pressed => {
+                    self.keyboard_state.insert(key);
+                }
+                ElementState::Released => {
+                    self.keyboard_state.remove(&key);
+                }
+            },
+            WindowEvent::MouseInput {
+                button: MouseButton::Right,
+                state,
+                ..
+            } => {
+                let window = &mut self.window.as_mut().unwrap();
+                self.right_mouse_pressed = state == ElementState::Pressed;
+                match state {
+                    // X11 and Win32: Doesn't support CursorGrabMode::Locked
+                    // Web: Doesn't support CursorGrabMode::Confined
+                    ElementState::Pressed => {
+                        window.set_cursor_visible(false);
+                        window
+                            .set_cursor_grab(CursorGrabMode::Locked)
+                            .or_else(|_| window.set_cursor_grab(CursorGrabMode::Confined))
+                            .unwrap();
+                    }
+                    ElementState::Released => {
+                        // Wayland: Centering back cursor is not relevant to Wayland, because
+                        // CursorGrabMode::Locked always keeps cursor at center.
+                        // Web: Doesn't support changing cursor position
+                        #[cfg(not(target_arch = "wasm32"))]
+                        {
+                            let window_center_pos =
+                                PhysicalPosition::new(WINDOW_WIDTH / 2, WINDOW_HEIGHT / 2);
+                            let _ = window.set_cursor_position(window_center_pos);
+                        }
+                        window.set_cursor_grab(CursorGrabMode::None).unwrap();
+                        window.set_cursor_visible(true);
+                    }
+                }
+            }
+            WindowEvent::RedrawRequested => {
+                // Web: corresponds to HTML canvas requestAnimationFrame() call, hence calling
+                // update() here and using the custom loop on native.
+                #[cfg(target_arch = "wasm32")]
+                self.update();
+
+                let draw_props = &mut self.draw_props.borrow_mut();
+                if draw_props.overlay_gui_enabled {
+                    self.gui.as_mut().unwrap().prepare_frame(
+                        &self.window.as_mut().unwrap(),
+                        &self.camera,
+                        draw_props,
+                    );
+                }
+                // TODO: Calling this every frame is slow.
+                #[cfg(target_arch = "wasm32")]
+                self.html_ui.as_mut().unwrap().sync_widgets(&draw_props);
+
+                let skybox = &self.skybox.as_ref().unwrap();
+                self.renderer.as_mut().unwrap().draw(
+                    &self.window.as_ref().unwrap(),
+                    &self.camera,
+                    &draw_props,
+                    &self.models,
+                    &skybox,
+                );
+                if draw_props.overlay_gui_enabled {
+                    self.gui
+                        .as_mut()
+                        .unwrap()
+                        .draw(&self.window.as_mut().unwrap());
+                }
+
+                #[cfg(not(target_arch = "wasm32"))]
+                self.glutin_window_context.as_ref().unwrap().swap_buffers();
+            }
+            _ => (),
+        }
+
+        self.gui
+            .as_mut()
+            .unwrap()
+            .handle_events(&self.window.as_mut().unwrap(), &event);
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: winit::event::DeviceId,
+        event: winit::event::DeviceEvent,
+    ) {
+        match event {
+            // Use the raw mouse motion for mouse look to avoid mouse position being limited
+            // within the window.
+            DeviceEvent::MouseMotion {
+                delta: (offset_x, offset_y),
+            } => {
+                if self.right_mouse_pressed {
+                    self.camera.look(offset_x as f32, offset_y as f32);
+                }
+            }
+            _ => (),
+        }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(w) = self.window.as_ref() {
+            w.request_redraw();
+        }
+    }
 }
 
 impl App {
     pub fn new() -> Result<Self, String> {
-        // Initialize windowing system
-        let mut glfw = glfw::init(glfw::fail_on_errors!())
-            .map_err(|e| format!("unable to initialize windowing system: {e}"))?;
-        glfw.window_hint(glfw::WindowHint::ContextVersion(4, 3));
-        glfw.window_hint(glfw::WindowHint::OpenGlProfile(
-            glfw::OpenGlProfileHint::Core,
-        ));
-        // TODO: Make window and OpenGL framebuffer resizable
-        glfw.window_hint(glfw::WindowHint::Resizable(false));
-
-        // Create window
-        let (mut window, events) = glfw
-            .create_window(
-                WINDOW_WIDTH,
-                WINDOW_HEIGHT,
-                WINDOW_TITLE,
-                glfw::WindowMode::Windowed,
-            )
-            .ok_or_else(|| "unable to create window")?;
-        window.make_current();
-        window.set_all_polling(true);
-        window.set_mouse_button_callback(&mouse_button_callback);
-
-        let raw = window.window_handle().unwrap().as_raw();
-        match raw {
-            RawWindowHandle::Win32(_) => println!("Display backend is Win32"),
-            RawWindowHandle::Xlib(_) => println!("Display backend is X11"),
-            RawWindowHandle::Wayland(_) => println!("Display backend is Wayland"),
-            _ => (),
-        }
-
-        // Init renderer
-        let renderer = Renderer::new(&mut window)
-            .map_err(|e| format!("unable to initialize renderer: {e}"))?;
-
-        // Init GUI
-        let gui = Gui::new(&mut window);
-
-        // Load resources
-        let skybox = SkyboxBuilder::new()
-            .with_right("assets/skybox/right.jpg")
-            .with_left("assets/skybox/left.jpg")
-            .with_top("assets/skybox/top.jpg")
-            .with_bottom("assets/skybox/bottom.jpg")
-            .with_front("assets/skybox/front.jpg")
-            .with_back("assets/skybox/back.jpg")
-            .build()
-            .map_err(|e| format!("unable to create skybox for application: {e}"))?;
-        let model_paths = [
-            "assets/meshes/cube.obj",
-            "assets/meshes/teapot.obj",
-            "assets/meshes/bunny.obj",
-        ];
-        let mut models: Vec<Model> = Vec::with_capacity(model_paths.len());
-        for path in &model_paths {
-            let model = Model::new(path)
-                .map_err(|e| format!("unable to create model from path {path}: {e}"))?;
-            models.push(model);
-        }
-
         Ok(Self {
-            last_mouse_pos: Vector2::new(WINDOW_WIDTH as f32 / 2.0, WINDOW_HEIGHT as f32 / 2.0),
-            draw_props: DrawProperties::default(),
-            skybox,
-            models,
+            window: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            glutin_window_context: None,
+            renderer: None,
+            keyboard_state: HashSet::new(),
+            right_mouse_pressed: false,
             // Positioning and rotation accidentally imitates a right-handed 3D
             // coordinate system with positive Z going farther from model, but this
             // setting is done because of initial orientation of the loaded Stanford
             // Bunny mesh.
             camera: Camera::new(Point3::new(1.7, 1.3, 4.0), Vector2::new(240.0, -15.0)),
-            gui,
-            renderer,
-            events,
-            window,
-            glfw,
+            draw_props: Arc::new(RefCell::new(DrawProperties::default())),
+            skybox: None,
+            models: Vec::new(),
+            gui: None,
+            #[cfg(target_arch = "wasm32")]
+            html_ui: None,
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn run(&mut self) {
+        let mut event_loop = EventLoop::new().unwrap();
+
         // Frame-rate independent loop with fixed update, variable framerate.
         //
         // A naive calculation and passing of a deltaTime introduces floating point
         // precision errors, leading to choppy camera movement and unstable logic
         // even on high framerate. Here, think of it as renderer dictating time, and
         // logic update adapting to it.
-        //
-        // Prefer steady_clock over high_resolution_clock, because
-        // high_resolution_clock could lie.
         let mut previous_time = std::time::Instant::now();
         // How much application "clock" is behind real time. Also known as
         // "accumulator"
         let mut lag: f32 = 0.0;
-        while !self.window.should_close() {
+        loop {
             let current_time = std::time::Instant::now();
             let elapsed_time = (current_time - previous_time).as_secs_f32();
             previous_time = current_time;
             lag += elapsed_time;
 
-            self.handle_input();
+            let timeout = Some(Duration::ZERO);
+            let status = event_loop.pump_app_events(timeout, self);
+            if let PumpStatus::Exit(_exit_code) = status {
+                break;
+            }
 
             while lag >= FIXED_UPDATE_TIMESTEP {
+                self.update();
                 lag -= FIXED_UPDATE_TIMESTEP;
             }
 
-            self.renderer.draw(
-                &self.window,
-                &self.camera,
-                &self.draw_props,
-                &self.models,
-                &self.skybox,
-            );
-            self.gui
-                .draw(&mut self.window, &self.camera, &mut self.draw_props);
-            self.window.swap_buffers();
+            let window = &self.window.as_ref().unwrap();
+            window.request_redraw();
         }
     }
 
-    fn handle_input(&mut self) {
-        self.glfw.poll_events();
+    #[cfg(target_arch = "wasm32")]
+    pub fn run(&mut self) -> Result<(), String> {
+        let event_loop = EventLoop::new().unwrap();
+        let _ = event_loop
+            .run_app(self)
+            .map_err(|e| format!("error during app runtime: {:?}", e))?;
+        Ok(())
+    }
 
-        // Propagate events to GUI
-        for (_, event) in glfw::flush_messages(&self.events) {
-            match event {
-                _ => self.gui.handle_event(&event),
-            }
-        }
-
+    fn update(&mut self) {
         // Keyboard input
-        if self.window.get_key(Key::Escape) == Action::Press {
-            self.window.set_should_close(true);
-        }
-        if self.window.get_key(Key::W) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::KeyW) {
             self.camera.move_forward(FIXED_UPDATE_TIMESTEP);
         }
-        if self.window.get_key(Key::S) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::KeyS) {
             self.camera.move_backward(FIXED_UPDATE_TIMESTEP);
         }
-        if self.window.get_key(Key::A) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::KeyA) {
             self.camera.strafe_left(FIXED_UPDATE_TIMESTEP);
         }
-        if self.window.get_key(Key::D) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::KeyD) {
             self.camera.strafe_right(FIXED_UPDATE_TIMESTEP);
         }
-        if self.window.get_key(Key::Space) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::Space) {
             self.camera.ascend(FIXED_UPDATE_TIMESTEP);
         }
-        if self.window.get_key(Key::C) == Action::Press {
+        if self.keyboard_state.contains(&KeyCode::KeyC) {
             self.camera.descend(FIXED_UPDATE_TIMESTEP);
-        }
-
-        // Mouse look
-        let (current_mouse_pos_x, current_mouse_pos_y) = self.window.get_cursor_pos();
-        if self.window.get_mouse_button(glfw::MouseButtonRight) == Action::Release {
-            // Always save position even when not holding down mouse button to avoid
-            // sudden jumps when initiating turning
-            self.last_mouse_pos.x = current_mouse_pos_x as f32;
-            self.last_mouse_pos.y = current_mouse_pos_y as f32;
-        } else {
-            let x_offset = current_mouse_pos_x as f32 - self.last_mouse_pos.x;
-            // Reversed because y is bottom to up
-            let y_offset = self.last_mouse_pos.y - current_mouse_pos_y as f32;
-            self.last_mouse_pos.x = current_mouse_pos_x as f32;
-            self.last_mouse_pos.y = current_mouse_pos_y as f32;
-            self.camera.look(x_offset, y_offset);
         }
     }
 }
 
-fn mouse_button_callback(
-    window: &mut Window,
-    button: MouseButton,
-    action: Action,
-    _modifiers: Modifiers,
-) {
-    // Initiate mouse look on right mouse button press
-    if button == glfw::MouseButtonRight {
-        if action == Action::Press {
-            if window.get_cursor_mode() == CursorMode::Normal {
-                // Cursor disable is required to temporarily center it for
-                // mouselook
-                window.set_cursor_mode(CursorMode::Disabled);
-            }
-        // Stop mouse look on release, give cursor back. Cursor position stays
-        // the same as before mouse look.
-        } else {
-            window.set_cursor_mode(CursorMode::Normal);
+/// Context Object pattern
+/// (https://accu.org/journals/overload/12/63/kelly_246/) to avoid blowing up App with large number
+/// of Option<> fields.
+#[cfg(not(target_arch = "wasm32"))]
+struct GlutinWindowContext {
+    glutin_context: PossiblyCurrentContext,
+    glutin_surface: Surface<WindowSurface>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl GlutinWindowContext {
+    fn new(glutin_context: PossiblyCurrentContext, glutin_surface: Surface<WindowSurface>) -> Self {
+        Self {
+            glutin_context,
+            glutin_surface,
         }
     }
+
+    fn resize(&self, width: u32, height: u32) {
+        self.glutin_surface.resize(
+            &self.glutin_context,
+            NonZeroU32::new(width).unwrap(),
+            NonZeroU32::new(height).unwrap(),
+        );
+    }
+
+    fn swap_buffers(&self) {
+        let _ = self.glutin_surface.swap_buffers(&self.glutin_context);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn initialize_native_window(
+    event_loop: &ActiveEventLoop,
+) -> Result<(Window, GlutinWindowContext, glow::Context), String> {
+    let window_attributes = WindowAttributes::default()
+        .with_title(WINDOW_TITLE)
+        .with_resizable(false)
+        .with_inner_size(LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT));
+    let display_builder =
+        DisplayBuilder::new().with_window_attributes(Some(window_attributes.clone()));
+    let (mut window, gl_config) = display_builder
+        .build(
+            event_loop,
+            ConfigTemplateBuilder::default(),
+            gl_config_picker,
+        )
+        .map_err(|e| format!("failed to create gl_config: {:?}", e))?;
+    let raw_window_handle = window
+        .as_ref()
+        .and_then(|w| w.window_handle().ok())
+        .map(|handle| handle.as_raw());
+    match raw_window_handle {
+        Some(RawWindowHandle::Win32(_)) => println!("Display backend is Win32"),
+        Some(RawWindowHandle::Xlib(_)) => println!("Display backend is X11"),
+        Some(RawWindowHandle::Wayland(_)) => println!("Display backend is Wayland"),
+        _ => (),
+    }
+
+    let gl_display = gl_config.display();
+    let gl_version = Version::new(4, 3);
+    let context_attributes = ContextAttributesBuilder::new()
+        .with_context_api(ContextApi::OpenGl(Some(gl_version)))
+        .build(raw_window_handle);
+
+    let not_current_gl_context = unsafe {
+        gl_display
+            .create_context(&gl_config, &context_attributes)
+            .map_err(|e| format!("failed to create a temporary context: {:?}", e))?
+    };
+
+    // Apply glutin gl_config options to winit window (removing incompatible options in the
+    // process)
+    let window = match window.take() {
+        Some(w) => w,
+        None => glutin_winit::finalize_window(event_loop, window_attributes, &gl_config)
+            .map_err(|e| format!("failed to apply GL options to window: {:?}", e))?,
+    };
+
+    let surface_attributes = window
+        .build_surface_attributes(SurfaceAttributesBuilder::default())
+        .map_err(|e| format!("failed to build window surface attributes: {:?}", e))?;
+    let glutin_surface = unsafe {
+        gl_config
+            .display()
+            .create_window_surface(&gl_config, &surface_attributes)
+            .map_err(|e| format!("failed to create window surface: {:?}", e))?
+    };
+    let glutin_context = not_current_gl_context
+        .make_current(&glutin_surface)
+        .map_err(|e| format!("failed to context make current: {:?}", e))?;
+
+    let gl = unsafe {
+        glow::Context::from_loader_function_cstr(|symbol| gl_display.get_proc_address(symbol))
+    };
+
+    Ok((
+        window,
+        GlutinWindowContext::new(glutin_context, glutin_surface),
+        gl,
+    ))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn gl_config_picker(configs: Box<dyn Iterator<Item = Config> + '_>) -> Config {
+    configs
+        .reduce(|accum, config| {
+            let transparency_check = config.supports_transparency().unwrap_or(false)
+                & !accum.supports_transparency().unwrap_or(false);
+
+            if transparency_check || config.num_samples() > accum.num_samples() {
+                config
+            } else {
+                accum
+            }
+        })
+        .unwrap()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn initialize_web_window(event_loop: &ActiveEventLoop) -> Result<(Window, glow::Context), String> {
+    let window = web_sys::window().ok_or_else(|| "could not get browser window".to_string())?;
+    let document = window
+        .document()
+        .ok_or_else(|| "could not get document from window".to_string())?;
+    let canvas_id = "renderer-canvas";
+    let canvas = document
+        .get_element_by_id(&canvas_id)
+        .ok_or_else(|| format!("could not find canvas element with id '{canvas_id}'"))?;
+    let canvas: HtmlCanvasElement = canvas
+        .dyn_into()
+        .map_err(|_| format!("'{canvas_id}' is not a canvas HTML element"))?;
+    let window_attributes = WindowAttributes::default()
+        .with_title(WINDOW_TITLE)
+        .with_canvas(Some(canvas.clone()));
+    let window = event_loop
+        .create_window(window_attributes)
+        .map_err(|e| format!("failed to create window: {:?}", e))?;
+
+    let webgl2_context: WebGl2RenderingContext = canvas
+        .get_context("webgl2")
+        .map_err(|e| format!("failed to get WebGL2 context: {:?}", e))?
+        .ok_or_else(|| "'webgl2' context is not available".to_string())?
+        .dyn_into()
+        .map_err(|_| "canvas does not support WebGL2".to_string())?;
+    let gl = glow::Context::from_webgl2_context(webgl2_context);
+
+    Ok((window, gl))
 }

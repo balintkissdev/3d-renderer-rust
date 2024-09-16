@@ -1,6 +1,9 @@
-// Parameter object for user to customize selected model, model transformations
-// and rendering properties from UI.
+/// Parameter object for user to customize selected model, model transformations
+/// and rendering properties from UI.
+///
+/// Recommended to use RefCell instead of Cell, because coyping this data is costly.
 pub struct DrawProperties {
+    pub overlay_gui_enabled: bool,
     pub background_color: [f32; 3],
     pub model_rotation: [f32; 3],
     pub model_color: [f32; 3],
@@ -16,6 +19,7 @@ pub struct DrawProperties {
 impl Default for DrawProperties {
     fn default() -> Self {
         Self {
+            overlay_gui_enabled: true,
             background_color: [0.5, 0.5, 0.5],
             model_rotation: [0.0, 0.0, 0.0],
             model_color: [0.0, 0.8, 1.0],

@@ -1,20 +1,59 @@
 [package]
+authors = ["Bálint Kiss"]
 name = "renderer-rust"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
+publish = false
 
-[dependencies]
-cgmath = "0.18.0"
-gl_generator = "0.14.0"
-glfw = { version = "0.58.0", features = ["wayland"] }
-image = { version = "0.25.2", default-features = false, features = ["jpeg", "rayon"] }
-imgui-glfw-rs = { path = "vendor/imgui-glfw-rs" }
-raw-window-handle = "0.6.2"
-tobj = "4.0.2"
-
-[build-dependencies]
-gl_generator = "0.14.0"
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "3d-renderer-rust"
+name = "3d-renderer-rust" # Rust project names cannot start with number by default, rename executable
 path = "src/main.rs"
+
+[dependencies]
+cfg-if = "1.0.0"
+cgmath = "0.18.0"
+# Latest upstream egui is compatible with latest winit 0.30.5. Old
+# EguiGlow::new() was not able to take &winit::event_loop::ActiveEventLoop as
+# parameter, expecting &winit::event_loop::EventLoopWindowTarget<E> instead.
+egui = { git = "https://github.com/emilk/egui", rev = "f4ed394" }
+egui_glow = { git = "https://github.com/emilk/egui", rev = "f4ed394", features = [
+    "winit",
+] }
+# TODO: Create PR to upstream that adds support to OpenGL 4.x shader subroutines
+glow = { git = "https://github.com/balintkissdev/glow", branch = "add_shader_subroutine_support" }
+image = { version = "0.25.2", default-features = false, features = [
+    "jpeg",
+    "rayon",
+] }
+raw-window-handle = "0.6.2"
+tobj = "4.0.2"
+winit = "0.30.5"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+glutin = "0.32.1"
+glutin-winit = "0.5.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.15", features = ["js"] }
+js-sys = "0.3.70"
+wasm-bindgen = "0.2.93"
+web-sys = { version = "0.3.70", features = [
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "HtmlSelectElement",
+    "WebGl2RenderingContext",
+    "Window",
+] }
+
+# HACK: Force egui_glow to use my version of glow
+[patch.crates-io]
+glow = { git = "https://github.com/balintkissdev/glow", branch = "add_shader_subroutine_support" }
+
+# TODO: Investigate wasm-opt tool, it's already included in the wasm-pack Webpack plugin
+[profile.release]
+opt-level = "s" # Optimize for small code size

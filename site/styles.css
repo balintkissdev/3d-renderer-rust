@@ -1,0 +1,89 @@
+html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+}
+
+#spinner {
+    height: 50px;
+    width: 50px;
+    margin: 0px auto;
+    -webkit-animation: rotation .8s linear infinite;
+    -moz-animation: rotation .8s linear infinite;
+    -o-animation: rotation .8s linear infinite;
+    animation: rotation 0.8s linear infinite;
+    border-left: 10px solid rgb(0,150,240);
+    border-right: 10px solid rgb(0,150,240);
+    border-bottom: 10px solid rgb(0,150,240);
+    border-top: 10px solid rgb(100,0,200);
+    border-radius: 100%;
+    background-color: rgb(200,100,250);
+}
+@-webkit-keyframes rotation {
+    from {-webkit-transform: rotate(0deg);}
+    to {-webkit-transform: rotate(360deg);}
+}
+@-moz-keyframes rotation {
+    from {-moz-transform: rotate(0deg);}
+    to {-moz-transform: rotate(360deg);}
+}
+@-o-keyframes rotation {
+    from {-o-transform: rotate(0deg);}
+    to {-o-transform: rotate(360deg);}
+}
+@keyframes rotation {
+    from {transform: rotate(0deg);}
+    to {transform: rotate(360deg);}
+}
+
+#renderer-canvas {
+    max-width: 100%;
+    height: auto;
+    /* Canvas must not have any border or padding, otherwise mouse coordinates will be wrong. */
+    border: 0px none;
+}
+
+.container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
+    margin: 0 auto;
+    gap: 1.5rem;
+}
+.controls-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+}
+
+ul {
+    list-style-type: none;
+    padding-left: 0;
+    margin: 20px;
+    flex: 1;
+}
+
+/* Desktop layout */
+@media (min-width: 768px) {
+    .container {
+        flex-direction: row;
+    }
+}
+
+/* Mobile/Tablet layout */
+@media (max-width: 767px) {
+    .container {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    #renderer-canvas {
+        width: 100%;
+    }
+
+    ul {
+        width: 100%;
+        max-width: 600px;
+    }
+}

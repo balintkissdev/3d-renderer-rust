@@ -4,30 +4,30 @@ use cgmath::{InnerSpace, Matrix4, Point3, Vector2, Vector3};
 const MOVEMENT_SPEED: f32 = 2.5;
 const LOOK_SENSITIVITY: f32 = 0.1;
 
-// Normalized mapping of positive Y axis in world coordinate space, always
-// pointing upwards in the viewport (x:0, y:1, z:0). Required to determine
-// the Right vector (mapping of positive X axis) when creating
-// the view matrix.
+/// Normalized mapping of positive Y axis in world coordinate space, always
+/// pointing upwards in the viewport (x:0, y:1, z:0). Required to determine
+/// the Right vector (mapping of positive X axis) when creating
+/// the view matrix.
 const UP_VECTOR: Vector3<f32> = Vector3 {
     x: 0.0,
     y: 1.0,
     z: 0.0,
 };
 
-// Decoupling of camera view position and rotation manipulation.
-//
-// Application-side logic accepts user input and updates viewing properties
-// through movement and look operations while renderer accesses the resulting
-// view matrix to use for applying Model-View-Projection transformation.
+/// Decoupling of camera view position and rotation manipulation.
+///
+/// Application-side logic accepts user input and updates viewing properties
+/// through movement and look operations while renderer accesses the resulting
+/// view matrix to use for applying Model-View-Projection transformation.
 pub struct Camera {
-    // Camera location in world coordinate space. Also known as "eye
-    // position".
+    /// Camera location in world coordinate space. Also known as "eye
+    /// position".
     position: Point3<f32>,
-    // Rotation elements are stored as Euler angles. Looking along X axis
-    // (left/right, snapped around Y axis) is known as "yaw". Looking along Y
-    // axis (up/down, snapped around X axis) us known as "pitch".
-    //
-    // Rolling around Z axis (like an aeroplane or spaceship) is omitted.
+    /// Rotation elements are stored as Euler angles. Looking along X axis
+    /// (left/right, snapped around Y axis) is known as "yaw". Looking along Y
+    /// axis (up/down, snapped around X axis) us known as "pitch".
+    ///
+    /// Rolling around Z axis (like an aeroplane or spaceship) is omitted.
     rotation: Vector2<f32>,
     // Direction vector storing the rotations computed from mouse movements.
     // Determines where the camera should point at.
@@ -72,14 +72,15 @@ impl Camera {
         self.position -= MOVEMENT_SPEED * UP_VECTOR * delta_time;
     }
 
-    // Apply mouse input changes to change camera direction. Offsets are mouse
-    // cursor distances from the center of the view.
+    /// Apply mouse input changes to change camera direction. Offsets are mouse
+    /// cursor distances from the center of the view.
     pub fn look(&mut self, x_offset: f32, y_offset: f32) {
         self.rotation.x += x_offset * LOOK_SENSITIVITY;
         // Wrap to keep rotation degrees displayed between 0 and 360 on debug UI
         self.rotation.x = wrap_yaw(self.rotation.x);
 
-        self.rotation.y += y_offset * LOOK_SENSITIVITY;
+        // y_offset signedness is different on winit than on GLFW
+        self.rotation.y -= y_offset * LOOK_SENSITIVITY;
         // Avoid user to do a backflip
         self.rotation.y = self.rotation.y.clamp(-89.0, 89.0);
         self.update_direction();

@@ -3,7 +3,7 @@
 [![Build](https://github.com/balintkissdev/3d-renderer-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/balintkissdev/3d-renderer-rust/actions/workflows/ci.yml)
 
 > A hardware-accelerated 3D renderer written in Rust. Runs using OpenGL 4.3 as
-graphics API on desktop.
+graphics API on desktop and WebGL2 on WebAssembly.
 
 [Click here for C++ version of this project](https://github.com/balintkissdev/3d-renderer-cpp)
 
@@ -21,19 +21,23 @@ graphics API on desktop.
 
 ## Try it out!
 
-- [Windows 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.1.0/3d-renderer-rust-0.1.0-win64.zip)
-- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-cpp/releases/download/0.1.0/3d-renderer-rust-0.1.0-linux-x86_64.tar.gz)
+- [Live demo in web browser](https://www.balintkissdev.com/3d-renderer-rust)
+- [Windows 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.2.0/3d-renderer-rust-0.2.0-win64.zip)
+- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-cpp/releases/download/0.2.0/3d-renderer-rust-0.2.0-linux-x86_64.tar.gz)
 
 ## Motivation
 
-This project is a demonstration of my ability to write cross-platform 3D
-graphical applications in Rust. I designed my application to balance the correct
-level of abstractions and performance optimizations. The project showcases
+This project is a demonstration of my ability to use the Rust programming
+language to write 3D graphical applications that run both on
+native platforms and on the web with WebAssembly. The project showcases
 confident usage of the following technologies:
 
 - Rust
-- OpenGL 4.x
-- Immediate mode overlay GUI using Dear ImGui (as opposed to retained mode GUI frameworks like Qt)
+- OpenGL 4.x, WebGL2 (based on OpenGL ES 3.0)
+- Immediate mode overlay GUI using [egui](https://crates.io/crates/egui) (as opposed to retained mode GUI frameworks like Qt)
+- Building for [WebAssembly](https://webassembly.org/) using [webpack](https://webpack.js.org/)
+- HTML bindings into Rust binary
+- Advanced `cargo` features (crate patching)
 
 Future additions will include Direct3D, Vulkan rendering backends and additional post-processing effects.
 
@@ -43,6 +47,9 @@ Future additions will include Direct3D, Vulkan rendering backends and additional
 - Fly-by FPS camera movement
 - Skybox display using cube-map
 - Directional light with ADS (Ambient, Diffuse, Specular) lighting (Phong shading)
+- Live browser demo
+- HTML controls interacting with the 3D scene
+- Pure Rust dependencies without relying on C/C++ library bindings
 
 ## Requirements
 
@@ -50,21 +57,19 @@ Desktop executable requires an OpenGL 4.3 compatible graphics adapter to run.
 Check if your hardware supports OpenGL 4.3 and have the latest graphics driver
 installed.
 
-Required build dependencies on Debian, Ubuntu, Linux Mint:
+Web browser live demo requires support of WebGL2.
 
-```sh
-sudo apt-get install extra-cmake-modules libglfw3-dev wayland-protocols libxkbcommon-dev xorg-dev
-```
+Dependencies are automatically downloaded by `cargo`.
 
-Required build dependencies on Fedora, Red Hat:
-
-```sh
-sudo dnf install extra-cmake-modules glfw-devel wayland-protocols wayland-devel libxkbcommon-devel libXcursor-devel libXi-devel libXinerama-devel libXrandr-devel
-```
-
-No additinal dependencies are required to be installed on Windows builds.
-
-All other dependencies are either included in `vendor` folder or automatically downloaded by `cargo`.
+- [cgmath](https://crates.io/crates/cgmath)
+- [egui](https://crates.io/crates/egui)
+- [glow](https://crates.io/crates/glow)
+- [glutin](https://crates.io/crates/glutin)
+- [image](https://crates.io/crates/image)
+- [tobj](https://crates.io/crates/tobj)
+- [wasm-bindgen](https://crates.io/crates/wasm-bindgen)
+- [web-sys](https://crates.io/crates/web-sys)
+- [winit](https://crates.io/crates/winit)
 
 ## Build
 
@@ -84,6 +89,30 @@ https://www.rust-lang.org/tools/install
   cargo run --release
   ```
 
+### WebAssembly build
+
+Web build requires Node.js and `npm` as package manager. The recommended way to install `npm` is using a Node version manager like [nvm](https://github.com/nvm-sh/nvm).
+
+Use `npm` to install Node package dependencies:
+
+```sh
+npm install
+```
+
+Build the web application (there's no need to install `wasm-pack` separately, because it is automatically downloaded locally by `webpack`):
+
+```sh
+npm run build
+```
+
+Run the web application by serving it on live server:
+
+```sh
+npm run serve
+```
+
+You can access the application at `http://localhost:8080`.
+
 ## Usage
 
 Use keyboard and mouse to navigate the 3D environment.
@@ -93,7 +122,7 @@ Use keyboard and mouse to navigate the 3D environment.
 - Ascend: `Spacebar`
 - Descend: `C`
 
-Modify UI controls to change properties of the 3D model display.
+Modify UI controls to change properties of the 3D model display. Browser demo also has HTML controls.
 
 ## Resources
 

@@ -1,113 +1,97 @@
-use crate::gl;
-use cgmath::{vec3, Vector3};
-use gl::types::*;
+use std::sync::Arc;
 
-// Representation of 3D model (currently mesh only).
-//
-// Mesh face vertices reside in GPU memory.
-// Vertices are referred by indices to avoid storing duplicated vertices.
+use cgmath::{vec3, Vector3};
+use glow::{Buffer, HasContext, VertexArray};
+
+/// Representation of 3D model (currently mesh only).
+///
+/// Mesh face vertices reside in GPU memory.
+/// Vertices are referred by indices to avoid storing duplicated vertices.
 pub struct Model {
-    pub vertex_array: GLuint,
-    pub indices: Vec<GLuint>,
-    vertex_buffer: GLuint,
-    index_buffer: GLuint,
+    gl: Arc<glow::Context>,
+    pub vertex_array: VertexArray,
+    pub indices: Vec<u32>,
+    vertex_buffer: Buffer,
+    index_buffer: Buffer,
 }
 
-// Per-vertex data containing vertex attributes for each vertex.
-//
-// Texture UV coordinates are omitted because none of the bundled default
-// models have textures.
+/// Per-vertex data containing vertex attributes for each vertex.
+///
+/// Texture UV coordinates are omitted because none of the bundled default
+/// models have textures.
 #[repr(C)] // Avoid Rust compiler to reorder or use different alignments for vertex fields
 struct Vertex {
-    pub position: Vector3<GLfloat>,
-    pub normal: Vector3<GLfloat>,
+    pub position: Vector3<f32>,
+    pub normal: Vector3<f32>,
 }
 
 impl Model {
-    pub fn new(path: &str) -> Result<Model, String> {
-        let (vertices, indices) = load_model_from_file(path)?;
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn create_from_file(gl: Arc<glow::Context>, path: &str) -> Result<Model, String> {
+        let (vertices, indices) = load_obj_from_file(path)?;
+        let (vertex_array, vertex_buffer, index_buffer) =
+            setup_shader_plumbing(&gl, &vertices, &indices);
 
-        unsafe {
-            // Create vertex array
-            let mut vertex_array = 0;
-            gl::GenVertexArrays(1, &mut vertex_array);
-            gl::BindVertexArray(vertex_array);
+        Ok(Self {
+            gl,
+            vertex_array,
+            indices,
+            vertex_buffer,
+            index_buffer,
+        })
+    }
 
-            // Create vertex buffer
-            let mut vertex_buffer = 0;
-            gl::GenBuffers(1, &mut vertex_buffer);
-            gl::BindBuffer(gl::ARRAY_BUFFER, vertex_buffer);
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (vertices.len() * size_of::<Vertex>()) as GLsizeiptr,
-                vertices.as_ptr() as *const GLvoid,
-                gl::STATIC_DRAW,
-            );
+    #[cfg(target_arch = "wasm32")]
+    pub fn create_from_buffer(
+        gl: Arc<glow::Context>,
+        data: &'static [u8],
+    ) -> Result<Model, String> {
+        let (vertices, indices) =
+            load_obj_from_buffer(data).map_err(|e| format!("failed to load model: {:?}", e))?;
+        let (vertex_array, vertex_buffer, index_buffer) =
+            setup_shader_plumbing(&gl, &vertices, &indices);
 
-            // Create index buffer
-            let mut index_buffer = 0;
-            gl::GenBuffers(1, &mut index_buffer);
-            gl::BindBuffer(gl::ELEMENT_ARRAY_BUFFER, index_buffer);
-            gl::BufferData(
-                gl::ELEMENT_ARRAY_BUFFER,
-                (indices.len() * size_of::<GLuint>()) as GLsizeiptr,
-                indices.as_ptr() as *const GLvoid,
-                gl::STATIC_DRAW,
-            );
-
-            // Setup vertex array layout
-            let stride = size_of::<Vertex>() as GLsizei;
-            let position_vertex_attribute = 0;
-            gl::EnableVertexAttribArray(position_vertex_attribute);
-            gl::VertexAttribPointer(
-                position_vertex_attribute,
-                3,
-                gl::FLOAT,
-                gl::FALSE,
-                stride,
-                std::mem::offset_of!(Vertex, position) as *const GLvoid,
-            );
-
-            let normal_vertex_attribute = 1;
-            gl::EnableVertexAttribArray(normal_vertex_attribute);
-            gl::VertexAttribPointer(
-                normal_vertex_attribute,
-                3,
-                gl::FLOAT,
-                gl::FALSE,
-                stride,
-                std::mem::offset_of!(Vertex, normal) as *const GLvoid,
-            );
-
-            gl::BindVertexArray(0);
-
-            Ok(Self {
-                vertex_array,
-                indices,
-                vertex_buffer,
-                index_buffer,
-            })
-        }
+        Ok(Self {
+            gl,
+            vertex_array,
+            indices,
+            vertex_buffer,
+            index_buffer,
+        })
     }
 }
 
 impl Drop for Model {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteBuffers(1, &self.index_buffer);
-            gl::DeleteBuffers(1, &self.vertex_buffer);
-            gl::DeleteVertexArrays(1, &self.vertex_array);
+            self.gl.delete_buffer(self.index_buffer);
+            self.gl.delete_buffer(self.vertex_buffer);
+            self.gl.delete_vertex_array(self.vertex_array);
         }
     }
 }
 
-fn load_model_from_file(path: &str) -> Result<(Vec<Vertex>, Vec<GLuint>), String> {
+#[cfg(not(target_arch = "wasm32"))]
+fn load_obj_from_file(path: &str) -> Result<(Vec<Vertex>, Vec<u32>), String> {
     let obj = tobj::load_obj(path, &tobj::GPU_LOAD_OPTIONS)
         .map_err(|e| format!("failed to load model from {path}: {:?}", e))?;
 
-    let models = obj.0;
+    Ok(process_obj(&obj.0))
+}
+
+#[cfg(target_arch = "wasm32")]
+fn load_obj_from_buffer(data: &'static [u8]) -> Result<(Vec<Vertex>, Vec<u32>), String> {
+    let obj = tobj::load_obj_buf(&mut &data[..], &tobj::GPU_LOAD_OPTIONS, |_mtl_path| {
+        Ok(Default::default())
+    })
+    .map_err(|e| format!("failed to load model: {:?}", e))?;
+
+    Ok(process_obj(&obj.0))
+}
+
+fn process_obj(models: &Vec<tobj::Model>) -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices: Vec<Vertex> = Vec::new();
-    let mut indices: Vec<GLuint> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
     // Sometimes you get a mesh file with just a single mesh and no others.
     // The bundled default files are such meshes.
     for model in models {
@@ -132,5 +116,50 @@ fn load_model_from_file(path: &str) -> Result<(Vec<Vertex>, Vec<GLuint>), String
         indices.extend_from_slice(&mesh.indices);
     }
 
-    Ok((vertices, indices))
+    (vertices, indices)
+}
+
+fn setup_shader_plumbing(
+    gl: &glow::Context,
+    vertices: &Vec<Vertex>,
+    indices: &Vec<u32>,
+) -> (VertexArray, Buffer, Buffer) {
+    unsafe {
+        // Create vertex array
+        let vertex_array = gl.create_vertex_array().unwrap();
+        gl.bind_vertex_array(Some(vertex_array));
+
+        // Create vertex buffer
+        let vertex_buffer = gl.create_buffer().unwrap();
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+        let (_, vertices_bytes, _) = vertices.align_to::<u8>();
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, vertices_bytes, glow::STATIC_DRAW);
+
+        // Create index buffer
+        let index_buffer = gl.create_buffer().unwrap();
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
+        let (_, indices_bytes, _) = indices.align_to::<u8>();
+        gl.buffer_data_u8_slice(glow::ELEMENT_ARRAY_BUFFER, indices_bytes, glow::STATIC_DRAW);
+
+        // Setup vertex array layout
+        let position_vertex_attribute = 0;
+        let stride = size_of::<Vertex>() as i32;
+        gl.enable_vertex_attrib_array(position_vertex_attribute);
+        gl.vertex_attrib_pointer_f32(position_vertex_attribute, 3, glow::FLOAT, false, stride, 0);
+
+        let normal_vertex_attribute = 1;
+        gl.enable_vertex_attrib_array(normal_vertex_attribute);
+        gl.vertex_attrib_pointer_f32(
+            1,
+            3,
+            glow::FLOAT,
+            false,
+            stride,
+            std::mem::offset_of!(Vertex, normal) as i32,
+        );
+
+        gl.bind_vertex_array(None);
+
+        (vertex_array, vertex_buffer, index_buffer)
+    }
 }

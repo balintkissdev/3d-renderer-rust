@@ -1,91 +1,97 @@
-use cgmath::{Array, Matrix, Matrix3, Matrix4, Point3, Vector3};
-use std::ffi::CString;
+use std::sync::Arc;
 
-use crate::gl;
-use gl::types::*;
+use cfg_if::cfg_if;
+use cgmath::{Matrix, Matrix3, Matrix4, Point3, Vector3};
+use glow::*;
 
+/// Wrapper around shader with helper operations
+/// for loading, compiling, binding and uniform value update.
 pub struct Shader {
-    shader_program: GLuint,
-    subroutine_indices: Vec<GLuint>,
+    gl: Arc<glow::Context>,
+    shader_program: glow::Program,
+
+    #[cfg(not(target_arch = "wasm32"))]
+    subroutine_indices: Vec<u32>,
 }
 
-// Wrapper around shader with helper operations
-// for loading, compiling, binding, uniform value update.
 impl Shader {
-    pub fn new(vertex_shader_path: &str, fragment_shader_path: &str) -> Result<Self, String> {
+    pub fn new(
+        gl: Arc<glow::Context>,
+        vertex_shader_src: &str,
+        fragment_shader_src: &str,
+    ) -> Result<Self, String> {
         unsafe {
-            // Compile vertex shader
-            let vertex_shader = compile(vertex_shader_path, gl::VERTEX_SHADER).map_err(|e| {
-                format!("failed to compile vertex shader {vertex_shader_path}: {e}")
-            })?;
+            let vertex_shader = compile(&gl, vertex_shader_src, glow::VERTEX_SHADER)
+                .map_err(|e| format!("failed to compile vertex shader: {e}"))?;
+            let fragment_shader = compile(&gl, fragment_shader_src, glow::FRAGMENT_SHADER)
+                .map_err(|e| format!("failed to compile fragment shader: {e}"))?;
 
-            // Compile fragment shader
-            let fragment_shader =
-                compile(fragment_shader_path, gl::FRAGMENT_SHADER).map_err(|e| {
-                    format!("failed to compile fragment shader {fragment_shader_path}: {e}")
-                })?;
+            let shader_program = gl
+                .create_program()
+                .map_err(|e| format!("cannot create shader program: {e}"))?;
+            gl.attach_shader(shader_program, vertex_shader);
+            gl.attach_shader(shader_program, fragment_shader);
+            gl.link_program(shader_program);
+            if !gl.get_program_link_status(shader_program) {
+                return Err(format!(
+                    "failed to link shader program: {}",
+                    gl.get_program_info_log(shader_program)
+                ));
+            }
 
-            // Link shader program
-            let shader_program = gl::CreateProgram();
-            gl::AttachShader(shader_program, vertex_shader);
-            gl::AttachShader(shader_program, fragment_shader);
-            gl::LinkProgram(shader_program);
-            // Vertex and fragment shader not needed anymore after linked as part for
-            // program.
-            gl::DeleteShader(vertex_shader);
-            gl::DeleteShader(fragment_shader);
-            if check_linker_errors(shader_program) {
+            cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
                 Ok(Self {
+                    gl,
                     shader_program,
                     subroutine_indices: Vec::new(),
                 })
             } else {
-                return Err("failed to link shader program".to_string());
-            }
+                Ok(Self {
+                    gl,
+                    shader_program,
+                })
+
+            }}
         }
     }
 
-    // Bind shader to graphics pipeline to use for draw calls.
+    /// Bind shader to graphics pipeline to use for draw calls.
     pub fn r#use(&self) {
         unsafe {
-            gl::UseProgram(self.shader_program);
+            self.gl.use_program(Some(self.shader_program));
         }
     }
 
     pub fn set_uniform<T: Uniform>(&self, name: &str, v: &T) {
         unsafe {
-            let c_str = CString::new(name).unwrap();
-            let uniform_location =
-                gl::GetUniformLocation(self.shader_program, c_str.as_ptr() as *const GLchar);
-            v.set_uniform(uniform_location);
+            let uniform_location = self.gl.get_uniform_location(self.shader_program, name);
+            v.set_uniform(&self.gl, uniform_location.unwrap());
         }
     }
 
-    // Change subroutines to use in shader based on list of subroutine names.
-    //
-    // Subroutines are analogous to C function pointers and is an efficient way
-    // to customize parts of the shader program to execute.
-    //
-    // Shader subroutines are only supported from OpenGL 4.0+ and are not
-    // available in OpenGL ES 3.0.
-    pub fn update_subroutines(&mut self, shader_type: GLenum, names: &[&str]) {
+    /// Change subroutines to use in shader based on list of subroutine names.
+    ///
+    /// Subroutines are analogous to C function pointers and is an efficient way
+    /// to customize parts of the shader program to execute.
+    ///
+    /// Shader subroutines are only supported from OpenGL 4.0+ and are not
+    /// available in OpenGL ES 3.0.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn update_subroutines(&mut self, shader_type: u32, names: &[&str]) {
         // TODO: Clearing subroutine indices on every frame update is slow
         self.subroutine_indices.clear();
 
         for &name in names {
-            let c_name = CString::new(name).unwrap();
             let index = unsafe {
-                gl::GetSubroutineIndex(self.shader_program, shader_type, c_name.as_ptr())
+                self.gl
+                    .get_subroutine_index(self.shader_program, shader_type, name)
             };
             self.subroutine_indices.push(index);
         }
 
         unsafe {
-            gl::UniformSubroutinesuiv(
-                shader_type,
-                self.subroutine_indices.len() as GLsizei,
-                self.subroutine_indices.as_ptr(),
-            );
+            self.gl
+                .uniform_subroutines_u32_slice(shader_type, &self.subroutine_indices);
         }
     }
 }
@@ -93,115 +99,75 @@ impl Shader {
 impl Drop for Shader {
     fn drop(&mut self) {
         unsafe {
-            if self.shader_program != 0 {
-                gl::DeleteProgram(self.shader_program);
-                self.shader_program = 0; // Prevent double delete
-            }
+            self.gl.delete_program(self.shader_program);
         }
     }
 }
 
-unsafe fn compile(shader_path: &str, shader_type: GLenum) -> Result<GLuint, String> {
-    let src = std::fs::read_to_string(shader_path)
-        .map_err(|e| format!("unable to read GLSL file: {e}"))?;
-    let c_str = CString::new(src.as_bytes())
-        .map_err(|e| format!("failed to convert GLSL source to C string: {e}"))?;
-    let shader = gl::CreateShader(shader_type);
-    gl::ShaderSource(shader, 1, &c_str.as_ptr(), std::ptr::null());
-    gl::CompileShader(shader);
-
-    if check_compile_errors(shader, shader_type) {
-        Ok(shader)
-    } else {
-        Err("failed to compile GLSL code".to_string())
-    }
-}
-
-unsafe fn check_compile_errors(shader_id: GLuint, shader_type: GLenum) -> bool {
-    let mut success: GLint = 0;
-    gl::GetShaderiv(shader_id, gl::COMPILE_STATUS, &mut success);
-
-    if success == 0 {
-        let mut message_length: GLint = 0;
-        gl::GetShaderiv(shader_id, gl::INFO_LOG_LENGTH, &mut message_length);
-
-        let mut message_buffer: Vec<u8> = Vec::with_capacity(message_length as usize);
-        gl::GetShaderInfoLog(
-            shader_id,
-            message_length,
-            std::ptr::null_mut(),
-            message_buffer.as_mut_ptr() as *mut GLchar,
-        );
-        let message_type = if shader_type == gl::VERTEX_SHADER {
-            "vertex"
-        } else {
-            "fragment"
-        };
-        let message = std::str::from_utf8(&message_buffer).unwrap();
-        eprintln!("{message_type} shader compile error: {message}");
+unsafe fn compile(
+    gl: &glow::Context,
+    shader_src: &str,
+    shader_type: u32,
+) -> Result<glow::Shader, String> {
+    let shader = gl
+        .create_shader(shader_type)
+        .map_err(|e| format!("cannot create shader: {e}"))?;
+    gl.shader_source(shader, &shader_src);
+    gl.compile_shader(shader);
+    if !gl.get_shader_compile_status(shader) {
+        return Err(format!(
+            "failed to compile GLSL code: {}",
+            gl.get_shader_info_log(shader)
+        ));
     }
 
-    success != 0
-}
-
-unsafe fn check_linker_errors(shader_id: GLuint) -> bool {
-    let mut success: GLint = 0;
-    gl::GetProgramiv(shader_id, gl::LINK_STATUS, &mut success);
-
-    if success == 0 {
-        let mut message_length: GLint = 0;
-        gl::GetProgramiv(shader_id, gl::INFO_LOG_LENGTH, &mut message_length);
-
-        let mut message_buffer: Vec<u8> = Vec::with_capacity(message_length as usize);
-        gl::GetProgramInfoLog(
-            shader_id,
-            message_length,
-            std::ptr::null_mut(),
-            message_buffer.as_mut_ptr() as *mut GLchar,
-        );
-        let message = std::str::from_utf8(&message_buffer).unwrap();
-        eprintln!("shader link error: {message}");
-    }
-
-    success != 0
+    Ok(shader)
 }
 
 pub trait Uniform {
-    unsafe fn set_uniform(&self, uniform_location: GLint);
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation);
+}
+
+impl Uniform for bool {
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        gl.uniform_1_i32(Some(&uniform_location), *self as i32);
+    }
 }
 
 impl Uniform for i32 {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::Uniform1i(uniform_location, *self);
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        gl.uniform_1_i32(Some(&uniform_location), *self);
     }
 }
 
 impl Uniform for [f32; 3] {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::Uniform3fv(uniform_location, 1, self.as_ptr());
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        gl.uniform_3_f32(Some(&uniform_location), self[0], self[1], self[2]);
     }
 }
 
 impl Uniform for Point3<f32> {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::Uniform3fv(uniform_location, 1, self.as_ptr());
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        gl.uniform_3_f32(Some(&uniform_location), self.x, self.y, self.z);
     }
 }
 
 impl Uniform for Vector3<f32> {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::Uniform3fv(uniform_location, 1, self.as_ptr());
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        gl.uniform_3_f32(Some(&uniform_location), self.x, self.y, self.z);
     }
 }
 
 impl Uniform for Matrix3<f32> {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::UniformMatrix3fv(uniform_location, 1, gl::FALSE, self.as_ptr());
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        let slice = std::slice::from_raw_parts(self.as_ptr(), 9);
+        gl.uniform_matrix_3_f32_slice(Some(&uniform_location), false, slice);
     }
 }
 
 impl Uniform for Matrix4<f32> {
-    unsafe fn set_uniform(&self, uniform_location: GLint) {
-        gl::UniformMatrix4fv(uniform_location, 1, gl::FALSE, self.as_ptr());
+    unsafe fn set_uniform(&self, gl: &glow::Context, uniform_location: UniformLocation) {
+        let slice = std::slice::from_raw_parts(self.as_ptr(), 16);
+        gl.uniform_matrix_4_f32_slice(Some(&uniform_location), false, slice);
     }
 }
