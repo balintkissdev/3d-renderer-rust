@@ -11,7 +11,7 @@ import("../pkg")
         //
         // Ignore it.
         if (!err.message.includes("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
-            const errorMsg = `Failed to load WebAssebmyl module: ${err}`;
+            const errorMsg = `Failed to load WebAssembly module: ${err}`;
             console.error(errorMsg);
             alert(errorMsg);
         }
