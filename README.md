@@ -28,12 +28,12 @@ graphics API on desktop and WebGL2 on WebAssembly.
 ## Motivation
 
 This project is a demonstration of my ability to use the Rust programming
-language to write 3D graphical applications that run both on
-native platforms and on the web with WebAssembly. The project showcases
+language to write cross-platform 3D graphical applications that run both on
+desktop (Windows, Linux) and on the web with WebAssembly. The project showcases
 confident usage of the following technologies:
 
 - Rust
-- OpenGL 4.x, WebGL2 (based on OpenGL ES 3.0)
+- 3D graphics programming with OpenGL 4.x and WebGL2 (based on OpenGL ES 3.0)
 - Immediate mode overlay GUI using [egui](https://crates.io/crates/egui) (as opposed to retained mode GUI frameworks like Qt)
 - Building for [WebAssembly](https://webassembly.org/) using [webpack](https://webpack.js.org/)
 - HTML bindings into Rust binary
