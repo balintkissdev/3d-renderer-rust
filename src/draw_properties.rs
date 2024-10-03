@@ -4,6 +4,8 @@
 /// Recommended to use RefCell instead of Cell, because coyping this data is costly.
 pub struct DrawProperties {
     pub overlay_gui_enabled: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub vsync_enabled: bool,
     pub background_color: [f32; 3],
     pub model_rotation: [f32; 3],
     pub model_color: [f32; 3],
@@ -20,6 +22,8 @@ impl Default for DrawProperties {
     fn default() -> Self {
         Self {
             overlay_gui_enabled: true,
+            #[cfg(not(target_arch = "wasm32"))]
+            vsync_enabled: false,
             background_color: [0.5, 0.5, 0.5],
             model_rotation: [0.0, 0.0, 0.0],
             model_color: [0.0, 0.8, 1.0],
@@ -32,4 +36,15 @@ impl Default for DrawProperties {
             specular_enabled: true,
         }
     }
+}
+
+/// Information for displaying framerate measurements.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Default)]
+pub struct FrameRateInfo {
+    /// Average number of rendered frames for 1 second
+    pub frames_per_second: f32,
+    /// Number of milliseconds spent during rendering a single frame. More
+    /// useful metric for performance measurement than simple FPS.
+    pub ms_per_frame: f32,
 }

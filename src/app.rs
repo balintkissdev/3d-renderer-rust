@@ -23,7 +23,7 @@ cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
         context::{ContextApi, ContextAttributesBuilder, PossiblyCurrentContext, Version},
         display::GetGlDisplay,
         prelude::*,
-        surface::{Surface, SurfaceAttributesBuilder, WindowSurface},
+        surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
     };
     use glutin_winit::{DisplayBuilder, GlWindow};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -32,6 +32,7 @@ cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
         platform::pump_events::{EventLoopExtPumpEvents, PumpStatus}
     };
 
+    use crate::FrameRateInfo;
     use crate::SkyboxFileBuilder;
 } else {
     use wasm_bindgen::prelude::*;
@@ -66,6 +67,10 @@ pub struct App {
     window: Option<Window>,
     #[cfg(not(target_arch = "wasm32"))]
     glutin_window_context: Option<GlutinWindowContext>,
+    #[cfg(not(target_arch = "wasm32"))]
+    vsync_enabled: bool,
+    #[cfg(not(target_arch = "wasm32"))]
+    frame_rate_info: FrameRateInfo,
     renderer: Option<Renderer>,
     // Pushing pressed keys from event loop into this collection and processing in update() makes
     // movement continous. Naively checking for key press during event consumption leads to choppy
@@ -96,6 +101,8 @@ impl ApplicationHandler for App {
                     return;
                 }
             };
+            self.vsync_enabled = self.draw_props.borrow().vsync_enabled;
+            glutin_window_context.set_vsync_enabled(self.vsync_enabled);
             let gl = Arc::new(gl);
 
             let skybox = match SkyboxFileBuilder::new()
@@ -230,7 +237,7 @@ impl ApplicationHandler for App {
                     physical_size.height,
                     field_of_view,
                 );
-            },
+            }
             WindowEvent::KeyboardInput {
                 event:
                     KeyEvent {
@@ -291,6 +298,8 @@ impl ApplicationHandler for App {
                 if draw_props.overlay_gui_enabled {
                     self.gui.as_mut().unwrap().prepare_frame(
                         &self.window.as_mut().unwrap(),
+                        #[cfg(not(target_arch = "wasm32"))]
+                        &self.frame_rate_info,
                         &self.camera,
                         draw_props,
                     );
@@ -360,6 +369,10 @@ impl App {
             window: None,
             #[cfg(not(target_arch = "wasm32"))]
             glutin_window_context: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            vsync_enabled: false,
+            #[cfg(not(target_arch = "wasm32"))]
+            frame_rate_info: FrameRateInfo::default(),
             renderer: None,
             keyboard_state: HashSet::new(),
             right_mouse_pressed: false,
@@ -381,6 +394,9 @@ impl App {
     pub fn run(&mut self) {
         let mut event_loop = EventLoop::new().unwrap();
 
+        let mut elapsed_frame_time: f32 = 0.0;
+        let mut frame_count: i32 = 0;
+
         // Frame-rate independent loop with fixed update, variable framerate.
         //
         // A naive calculation and passing of a deltaTime introduces floating point
@@ -397,6 +413,10 @@ impl App {
             previous_time = current_time;
             lag += elapsed_time;
 
+            // Increase framerate counter
+            elapsed_frame_time += elapsed_time;
+            frame_count += 1;
+
             let timeout = Some(Duration::ZERO);
             let status = event_loop.pump_app_events(timeout, self);
             if let PumpStatus::Exit(_exit_code) = status {
@@ -410,6 +430,16 @@ impl App {
 
             let window = &self.window.as_ref().unwrap();
             window.request_redraw();
+
+            // Measure framerate when 1 second is exceeded
+            if 1.0 <= elapsed_frame_time {
+                self.frame_rate_info.frames_per_second = frame_count as f32 / elapsed_frame_time;
+                self.frame_rate_info.ms_per_frame = 1000.0 / frame_count as f32;
+
+                // Reset framerate counter
+                elapsed_frame_time -= 1.0;
+                frame_count = 0;
+            }
         }
     }
 
@@ -442,6 +472,15 @@ impl App {
         if self.keyboard_state.contains(&KeyCode::KeyC) {
             self.camera.descend(FIXED_UPDATE_TIMESTEP);
         }
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.vsync_enabled != self.draw_props.borrow().vsync_enabled {
+            self.vsync_enabled = self.draw_props.borrow().vsync_enabled;
+            self.glutin_window_context
+                .as_mut()
+                .unwrap()
+                .set_vsync_enabled(self.vsync_enabled);
+        }
     }
 }
 
@@ -461,6 +500,17 @@ impl GlutinWindowContext {
             glutin_context,
             glutin_surface,
         }
+    }
+
+    fn set_vsync_enabled(&self, vsync_enabled: bool) {
+        let swap_interval = match vsync_enabled {
+            true => SwapInterval::Wait(NonZeroU32::new(1).unwrap()),
+            false => SwapInterval::DontWait,
+        };
+
+        self.glutin_surface
+            .set_swap_interval(&self.glutin_context, swap_interval)
+            .unwrap();
     }
 
     fn resize(&self, width: u32, height: u32) {

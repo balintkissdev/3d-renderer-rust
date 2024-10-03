@@ -32,5 +32,6 @@ cfg_if! { if #[cfg(target_arch = "wasm32")] {
         Ok(())
     }
 } else {
+    pub use draw_properties::FrameRateInfo;
     pub use skybox::SkyboxFileBuilder;
 }}

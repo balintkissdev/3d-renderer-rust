@@ -5,6 +5,8 @@ use egui_glow::EguiGlow;
 use winit::{event::WindowEvent, event_loop::ActiveEventLoop};
 
 use crate::{Camera, DrawProperties};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::FrameRateInfo;
 
 /// Immediate GUI displayed as an overlay on top of rendered 3D scene. Available for both native and
 /// web builds.
@@ -30,6 +32,7 @@ impl Gui {
     pub fn prepare_frame(
         &mut self,
         window: &winit::window::Window,
+        #[cfg(not(target_arch = "wasm32"))] frame_rate_info: &FrameRateInfo,
         camera: &Camera,
         draw_props: &mut DrawProperties,
     ) {
@@ -53,6 +56,17 @@ impl Gui {
                             }
                         });
 
+                    #[cfg(not(target_arch = "wasm32"))]
+                    egui::CollapsingHeader::new("Renderer")
+                        .default_open(true)
+                        .show(ui, |ui| {
+                            ui.label(format!(
+                                "{:.2} FPS, {:.6} ms/frame",
+                                frame_rate_info.frames_per_second, frame_rate_info.ms_per_frame
+                            ));
+                            ui.checkbox(&mut draw_props.vsync_enabled, "Vertical sync");
+                        });
+
                     // Camera
                     egui::CollapsingHeader::new("Camera")
                         .default_open(true)
@@ -70,20 +84,15 @@ impl Gui {
                             ));
 
                             ui.add(
-                                egui::Slider::new(
-                                    &mut draw_props.field_of_view,
-                                    45.0..=120.0,
-                                )
-                                .text("Field of view (FOV)")
-                                .suffix("°"),
+                                egui::Slider::new(&mut draw_props.field_of_view, 45.0..=120.0)
+                                    .text("Field of view (FOV)")
+                                    .suffix("°"),
                             );
 
                             ui.checkbox(&mut draw_props.skybox_enabled, "Skybox");
                             if !draw_props.skybox_enabled {
                                 ui.horizontal(|ui| {
-                                    ui.color_edit_button_rgb(
-                                        &mut draw_props.background_color,
-                                    );
+                                    ui.color_edit_button_rgb(&mut draw_props.background_color);
                                     ui.label("Background color");
                                 });
                             }
