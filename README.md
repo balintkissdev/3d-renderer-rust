@@ -1,4 +1,4 @@
-# Real-time 3D renderer with OpenGL 4 written in Rust
+# Real-time 3D renderer with OpenGL 4/WebGL2 written in Rust
 
 [![Build](https://github.com/balintkissdev/3d-renderer-rust/actions/workflows/ci.yml/badge.svg)](https://github.com/balintkissdev/3d-renderer-rust/actions/workflows/ci.yml)
 
@@ -22,8 +22,8 @@ graphics API on desktop and WebGL2 on WebAssembly.
 ## Try it out!
 
 - [Live demo in web browser](https://www.balintkissdev.com/3d-renderer-rust)
-- [Windows 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.2.0/3d-renderer-rust-0.2.0-win64.zip)
-- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-cpp/releases/download/0.2.0/3d-renderer-rust-0.2.0-linux-x86_64.tar.gz)
+- [Windows 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.3.0/3d-renderer-rust-0.3.0-win64.zip)
+- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-cpp/releases/download/0.3.0/3d-renderer-rust-0.3.0-linux-x86_64.tar.gz)
 
 ## Motivation
 
