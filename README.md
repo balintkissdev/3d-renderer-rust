@@ -23,7 +23,7 @@ graphics API on desktop and WebGL2 on WebAssembly.
 
 - [Live demo in web browser](https://www.balintkissdev.com/3d-renderer-rust)
 - [Windows 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.3.0/3d-renderer-rust-0.3.0-win64.zip)
-- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-cpp/releases/download/0.3.0/3d-renderer-rust-0.3.0-linux-x86_64.tar.gz)
+- [Linux 64-bit download](https://github.com/balintkissdev/3d-renderer-rust/releases/download/0.3.0/3d-renderer-rust-0.3.0-linux-x86_64.tar.gz)
 
 ## Motivation
 
