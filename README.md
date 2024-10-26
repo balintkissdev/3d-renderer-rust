@@ -7,6 +7,13 @@ graphics API on desktop and WebGL2 on WebAssembly.
 
 [Click here for C++ version of this project](https://github.com/balintkissdev/3d-renderer-cpp)
 
+<p align="center">
+  <img src="doc/img/rust-logo-128x128.png" height="60"/>
+  <img src="doc/img/OpenGL_RGB_June16.svg" height="60"/>
+  <img src="doc/img/WebGL_RGB_June16.svg" height="60"/>
+  <img src="doc/img/web-assembly-logo.png" height="60"/>
+</p>
+
 ![Demo](doc/img/demo.png)
 
 ## Table of Contents
@@ -27,13 +34,13 @@ graphics API on desktop and WebGL2 on WebAssembly.
 
 ## Motivation
 
-This project is a demonstration of my ability to use the Rust programming
+This project is a demonstration of my expertise to use the Rust programming
 language to write cross-platform 3D graphical applications that run both on
 desktop (Windows, Linux) and on the web with WebAssembly. The project showcases
 confident usage of the following technologies:
 
 - Rust
-- 3D graphics programming with OpenGL 4.x and WebGL2 (based on OpenGL ES 3.0)
+- 3D graphics programming with OpenGL 4 and WebGL2 (based on OpenGL ES 3.0)
 - Immediate mode overlay GUI using [egui](https://crates.io/crates/egui) (as opposed to retained mode GUI frameworks like Qt)
 - Building for [WebAssembly](https://webassembly.org/) using [webpack](https://webpack.js.org/)
 - HTML bindings into Rust binary
