@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashSet, sync::Arc};
+use std::{cell::RefCell, sync::Arc};
 
 use cfg_if::cfg_if;
 use cgmath::{Point3, Vector2};
@@ -61,6 +61,50 @@ const WINDOW_TITLE: &str = "3D Renderer in Rust by Bálint Kiss";
 const MAX_LOGIC_UPDATE_PER_SECOND: f32 = 60.0;
 const FIXED_UPDATE_TIMESTEP: f32 = 1.0 / MAX_LOGIC_UPDATE_PER_SECOND;
 
+enum InputEvent {
+    MoveForward,
+    MoveBackward,
+    StrafeLeft,
+    StrafeRight,
+    Ascend,
+    Descend,
+}
+
+// Using array instead of HashSet results in a single jump table which is more friendlier to cache,
+// avoids heap allocation and hash function calls for HashSet, has better branch prediction and has
+// fewer CPU instructions.
+//
+// (Even though gains are negligable, because bottleneck is usually not the input handling)
+type InputState = [bool; 6];
+
+impl std::ops::Index<InputEvent> for InputState {
+    type Output = bool;
+
+    fn index(&self, e: InputEvent) -> &Self::Output {
+        match e {
+            InputEvent::MoveForward => &self[0],
+            InputEvent::MoveBackward => &self[1],
+            InputEvent::StrafeLeft => &self[2],
+            InputEvent::StrafeRight => &self[3],
+            InputEvent::Ascend => &self[4],
+            InputEvent::Descend => &self[5],
+        }
+    }
+}
+
+impl std::ops::IndexMut<InputEvent> for InputState {
+    fn index_mut(&mut self, e: InputEvent) -> &mut Self::Output {
+        match e {
+            InputEvent::MoveForward => &mut self[0],
+            InputEvent::MoveBackward => &mut self[1],
+            InputEvent::StrafeLeft => &mut self[2],
+            InputEvent::StrafeRight => &mut self[3],
+            InputEvent::Ascend => &mut self[4],
+            InputEvent::Descend => &mut self[5],
+        }
+    }
+}
+
 /// Encapsulation of renderer application lifecycle and logic update to avoid
 /// polluting main().
 pub struct App {
@@ -75,7 +119,7 @@ pub struct App {
     // Pushing pressed keys from event loop into this collection and processing in update() makes
     // movement continous. Naively checking for key press during event consumption leads to choppy
     // movement.
-    keyboard_state: HashSet<KeyCode>,
+    input_state: InputState,
     right_mouse_pressed: bool,
     draw_props: Arc<RefCell<DrawProperties>>,
     camera: Camera,
@@ -248,14 +292,18 @@ impl ApplicationHandler for App {
                     },
                 is_synthetic: false,
                 ..
-            } => match state {
-                ElementState::Pressed => {
-                    self.keyboard_state.insert(key);
-                }
-                ElementState::Released => {
-                    self.keyboard_state.remove(&key);
-                }
-            },
+            } => {
+                let input_event = match key {
+                    KeyCode::KeyW => InputEvent::MoveForward,
+                    KeyCode::KeyS => InputEvent::MoveBackward,
+                    KeyCode::KeyA => InputEvent::StrafeLeft,
+                    KeyCode::KeyD => InputEvent::StrafeRight,
+                    KeyCode::Space => InputEvent::Ascend,
+                    KeyCode::KeyC => InputEvent::Descend,
+                    _ => return,
+                };
+                self.input_state[input_event] = state == ElementState::Pressed;
+            }
             WindowEvent::MouseInput {
                 button: MouseButton::Right,
                 state,
@@ -374,7 +422,7 @@ impl App {
             #[cfg(not(target_arch = "wasm32"))]
             frame_rate_info: FrameRateInfo::default(),
             renderer: None,
-            keyboard_state: HashSet::new(),
+            input_state: InputState::default(),
             right_mouse_pressed: false,
             // Positioning and rotation accidentally imitates a right-handed 3D
             // coordinate system with positive Z going farther from model, but this
@@ -454,22 +502,22 @@ impl App {
 
     fn update(&mut self) {
         // Keyboard input
-        if self.keyboard_state.contains(&KeyCode::KeyW) {
+        if self.input_state[InputEvent::MoveForward] {
             self.camera.move_forward(FIXED_UPDATE_TIMESTEP);
         }
-        if self.keyboard_state.contains(&KeyCode::KeyS) {
+        if self.input_state[InputEvent::MoveBackward] {
             self.camera.move_backward(FIXED_UPDATE_TIMESTEP);
         }
-        if self.keyboard_state.contains(&KeyCode::KeyA) {
+        if self.input_state[InputEvent::StrafeLeft] {
             self.camera.strafe_left(FIXED_UPDATE_TIMESTEP);
         }
-        if self.keyboard_state.contains(&KeyCode::KeyD) {
+        if self.input_state[InputEvent::StrafeRight] {
             self.camera.strafe_right(FIXED_UPDATE_TIMESTEP);
         }
-        if self.keyboard_state.contains(&KeyCode::Space) {
+        if self.input_state[InputEvent::Ascend] {
             self.camera.ascend(FIXED_UPDATE_TIMESTEP);
         }
-        if self.keyboard_state.contains(&KeyCode::KeyC) {
+        if self.input_state[InputEvent::Descend] {
             self.camera.descend(FIXED_UPDATE_TIMESTEP);
         }
 
