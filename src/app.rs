@@ -337,24 +337,31 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
+                // TODO: Code littered with cfg directives. Consider platform-specific
+                // begin_frame() and end_frame() operations.
+
                 // Web: corresponds to HTML canvas requestAnimationFrame() call, hence calling
                 // update() here and using the custom loop on native.
                 #[cfg(target_arch = "wasm32")]
                 self.update();
 
                 let draw_props = &mut self.draw_props.borrow_mut();
-                if draw_props.overlay_gui_enabled {
-                    self.gui.as_mut().unwrap().prepare_frame(
-                        &self.window.as_mut().unwrap(),
-                        #[cfg(not(target_arch = "wasm32"))]
-                        &self.frame_rate_info,
-                        &self.camera,
-                        draw_props,
-                    );
+                cfg_if! {
+                    if #[cfg(not(target_arch = "wasm32"))] {
+                        self.gui.as_mut().unwrap().prepare_frame(
+                            &self.window.as_mut().unwrap(),
+                            &self.frame_rate_info,
+                            &self.camera,
+                            draw_props,
+                        );
+                    } else {
+                        self.gui.as_mut().unwrap().prepare_frame(
+                            &self.window.as_mut().unwrap(),
+                            &self.camera,
+                            draw_props,
+                        );
+                    }
                 }
-                // TODO: Calling this every frame is slow.
-                #[cfg(target_arch = "wasm32")]
-                self.html_ui.as_mut().unwrap().sync_widgets(&draw_props);
 
                 let skybox = &self.skybox.as_ref().unwrap();
                 self.renderer.as_mut().unwrap().draw(
@@ -364,15 +371,23 @@ impl ApplicationHandler for App {
                     &self.models,
                     &skybox,
                 );
-                if draw_props.overlay_gui_enabled {
-                    self.gui
-                        .as_mut()
-                        .unwrap()
-                        .draw(&self.window.as_mut().unwrap());
-                }
 
-                #[cfg(not(target_arch = "wasm32"))]
-                self.glutin_window_context.as_ref().unwrap().swap_buffers();
+                cfg_if! {
+                    if #[cfg(not(target_arch = "wasm32"))] {
+                        self.gui
+                            .as_mut()
+                            .unwrap()
+                            .draw(&self.window.as_mut().unwrap());
+                        self.glutin_window_context.as_ref().unwrap().swap_buffers();
+                    } else {
+                        if draw_props.overlay_gui_enabled {
+                            self.gui
+                                .as_mut()
+                                .unwrap()
+                                .draw(&self.window.as_mut().unwrap());
+                        }
+                    }
+                }
             }
             _ => (),
         }
@@ -521,13 +536,19 @@ impl App {
             self.camera.descend(FIXED_UPDATE_TIMESTEP);
         }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        if self.vsync_enabled != self.draw_props.borrow().vsync_enabled {
-            self.vsync_enabled = self.draw_props.borrow().vsync_enabled;
-            self.glutin_window_context
-                .as_mut()
-                .unwrap()
-                .set_vsync_enabled(self.vsync_enabled);
+        cfg_if! {
+            if #[cfg(not(target_arch = "wasm32"))] {
+                if self.vsync_enabled != self.draw_props.borrow().vsync_enabled {
+                    self.vsync_enabled = self.draw_props.borrow().vsync_enabled;
+                    self.glutin_window_context
+                        .as_mut()
+                        .unwrap()
+                        .set_vsync_enabled(self.vsync_enabled);
+                }
+            } else {
+                // TODO: Calling this every frame is slow.
+                self.html_ui.as_mut().unwrap().sync_widgets(&self.draw_props.borrow());
+            }
         }
     }
 }
