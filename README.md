@@ -22,7 +22,7 @@ graphics API on desktop and WebGL2 on WebAssembly.
 - [Motivation](#motivation)
 - [Features](#features)
 - [Requirements](#requirements)
-- [Build Instructions](#build-instructions)
+- [Build instructions](#build-instructions)
 - [Usage](#usage)
 - [Resources](#resources)
 
@@ -78,7 +78,7 @@ Dependencies are automatically downloaded by `cargo`.
 - [web-sys](https://crates.io/crates/web-sys)
 - [winit](https://crates.io/crates/winit)
 
-## Build
+## Build instructions
 
 1. Make sure you have the latest stable version of Rust and `cargo` installed, following the instructions on
 https://www.rust-lang.org/tools/install
