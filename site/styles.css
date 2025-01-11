@@ -53,11 +53,16 @@ html, body {
 }
 .controls-container {
     display: flex;
+    flex-direction: column;
     justify-content: center;
     align-items: flex-start;
+    gap: 1.5rem;
+}
+.controls-container fieldset {
+    width: 100%;
 }
 
-ul {
+.properties-list {
     list-style-type: none;
     padding-left: 0;
     margin: 20px;
