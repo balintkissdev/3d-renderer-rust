@@ -15,13 +15,7 @@ path = "src/main.rs"
 [dependencies]
 cfg-if = "1.0.0"
 cgmath = "0.18.0"
-# Latest upstream egui is compatible with latest winit 0.30.5. Old
-# EguiGlow::new() was not able to take &winit::event_loop::ActiveEventLoop as
-# parameter, expecting &winit::event_loop::EventLoopWindowTarget<E> instead.
-egui = { git = "https://github.com/emilk/egui", rev = "f4ed394" }
-egui_glow = { git = "https://github.com/emilk/egui", rev = "f4ed394", features = [
-    "winit",
-] }
+egui = { git = "https://github.com/emilk/egui", rev = "f4ed394" }   # TODO: Still used in wasm32 for UI color values
 # TODO: Create PR to upstream that adds support to OpenGL 4.x shader subroutines
 glow = { git = "https://github.com/balintkissdev/glow", branch = "add_shader_subroutine_support" }
 image = { version = "0.25.2", default-features = false, features = [
@@ -35,6 +29,13 @@ winit = "0.30.5"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 glutin = "0.32.1"
 glutin-winit = "0.5.0"
+# FIXME: egui has issues on wasm32 target. Reenable once fixed.
+# Latest upstream egui is compatible with latest winit 0.30.5. Old
+# EguiGlow::new() was not able to take &winit::event_loop::ActiveEventLoop as
+# parameter, expecting &winit::event_loop::EventLoopWindowTarget<E> instead.
+egui_glow = { git = "https://github.com/emilk/egui", rev = "f4ed394", features = [
+    "winit",
+] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { version = "0.2.15", features = ["js"] }

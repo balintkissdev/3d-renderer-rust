@@ -7,8 +7,6 @@ mod camera;
 pub use camera::Camera;
 mod draw_properties;
 pub use draw_properties::DrawProperties;
-mod gui;
-pub use gui::Gui;
 mod model;
 pub use model::Model;
 mod renderer;
@@ -32,6 +30,8 @@ cfg_if! { if #[cfg(target_arch = "wasm32")] {
         Ok(())
     }
 } else {
+    mod gui;
+    pub use gui::Gui;
     pub use draw_properties::FrameRateInfo;
     pub use skybox::SkyboxFileBuilder;
 }}

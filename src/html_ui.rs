@@ -12,8 +12,6 @@ use web_sys::{
 use crate::DrawProperties;
 
 /// HTML equivalent of widgets available in overlay immediate GUI.
-///
-/// Values of HTML and immediate GUI widgets are synchronized with eachother in the application.
 pub struct HtmlUI {
     skybox_checkbox: HtmlInputElement,
     background_color_picker: HtmlInputElement,
@@ -33,19 +31,6 @@ pub struct HtmlUI {
 impl HtmlUI {
     pub fn new(draw_props: Arc<RefCell<DrawProperties>>) -> Self {
         let document = web_sys::window().unwrap().document().unwrap();
-
-        // Display immediate mode overlay GUI
-        let draw_props_clone = draw_props.clone();
-        // This HTML element is not required to sync with overlay GUI, therefore it is
-        // intentionally not saved as struct field for later use.
-        let _gui_overlay_checkbox = setup_checkbox(
-            &document,
-            "gui-overlay-checkbox",
-            draw_props.borrow().overlay_gui_enabled,
-            move |v| {
-                draw_props_clone.borrow_mut().overlay_gui_enabled = v;
-            },
-        );
 
         // Skybox
         let draw_props_clone = draw_props.clone();

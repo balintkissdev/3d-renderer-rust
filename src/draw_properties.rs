@@ -3,8 +3,6 @@
 ///
 /// Recommended to use RefCell instead of Cell, because coyping this data is costly.
 pub struct DrawProperties {
-    #[cfg(target_arch = "wasm32")]
-    pub overlay_gui_enabled: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pub vsync_enabled: bool,
     pub background_color: [f32; 3],
@@ -22,8 +20,6 @@ pub struct DrawProperties {
 impl Default for DrawProperties {
     fn default() -> Self {
         Self {
-            #[cfg(target_arch = "wasm32")]
-            overlay_gui_enabled: false,
             #[cfg(not(target_arch = "wasm32"))]
             vsync_enabled: false,
             background_color: [0.5, 0.5, 0.5],

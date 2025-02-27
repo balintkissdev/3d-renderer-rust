@@ -10,7 +10,7 @@ use winit::{
     window::{CursorGrabMode, Window, WindowAttributes},
 };
 
-use crate::{assets, Camera, DrawProperties, Gui, Model, Renderer, Skybox};
+use crate::{assets, Camera, DrawProperties, Model, Renderer, Skybox};
 
 cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
     use std::{
@@ -32,15 +32,13 @@ cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
         platform::pump_events::{EventLoopExtPumpEvents, PumpStatus}
     };
 
-    use crate::FrameRateInfo;
-    use crate::SkyboxFileBuilder;
+    use crate::{FrameRateInfo, Gui, SkyboxFileBuilder};
 } else {
     use wasm_bindgen::prelude::*;
     use web_sys::{HtmlCanvasElement, WebGl2RenderingContext};
     use winit::platform::web::WindowAttributesExtWebSys;
 
-    use crate::HtmlUI;
-    use crate::SkyboxBufferBuilder;
+    use crate::{HtmlUI, SkyboxBufferBuilder};
 }}
 
 cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
@@ -125,6 +123,7 @@ pub struct App {
     camera: Camera,
     skybox: Option<Skybox>,
     models: Vec<Model>,
+    #[cfg(not(target_arch = "wasm32"))] // FIXME: Reenable later
     gui: Option<Gui>,
     #[cfg(target_arch = "wasm32")]
     html_ui: Option<HtmlUI>,
@@ -228,16 +227,16 @@ impl ApplicationHandler for App {
                 return;
             }
         };
-        let gui = Gui::new(&event_loop, gl.clone());
 
         self.window = Some(window);
         self.renderer = Some(renderer);
         self.skybox = Some(skybox);
         self.models = models;
-        self.gui = Some(gui);
 
         cfg_if! { if #[cfg(not(target_arch = "wasm32"))] {
             self.glutin_window_context = Some(glutin_window_context);
+            let gui = Gui::new(&event_loop, gl.clone());
+            self.gui = Some(gui);
         } else {
             let html_ui = HtmlUI::new(self.draw_props.clone());
             self.html_ui = Some(html_ui);
@@ -354,12 +353,6 @@ impl ApplicationHandler for App {
                             &self.camera,
                             draw_props,
                         );
-                    } else {
-                        self.gui.as_mut().unwrap().prepare_frame(
-                            &self.window.as_mut().unwrap(),
-                            &self.camera,
-                            draw_props,
-                        );
                     }
                 }
 
@@ -379,23 +372,20 @@ impl ApplicationHandler for App {
                             .unwrap()
                             .draw(&self.window.as_mut().unwrap());
                         self.glutin_window_context.as_ref().unwrap().swap_buffers();
-                    } else {
-                        if draw_props.overlay_gui_enabled {
-                            self.gui
-                                .as_mut()
-                                .unwrap()
-                                .draw(&self.window.as_mut().unwrap());
-                        }
                     }
                 }
             }
             _ => (),
         }
 
-        self.gui
-            .as_mut()
-            .unwrap()
-            .handle_events(&self.window.as_mut().unwrap(), &event);
+        cfg_if! {
+            if #[cfg(not(target_arch = "wasm32"))] {
+                self.gui
+                    .as_mut()
+                    .unwrap()
+                    .handle_events(&self.window.as_mut().unwrap(), &event);
+            }
+        }
     }
 
     fn device_event(
@@ -447,6 +437,7 @@ impl App {
             draw_props: Arc::new(RefCell::new(DrawProperties::default())),
             skybox: None,
             models: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
             gui: None,
             #[cfg(target_arch = "wasm32")]
             html_ui: None,
